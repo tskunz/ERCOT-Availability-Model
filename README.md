@@ -16,7 +16,7 @@ pip install -r requirements.txt
 
 Get the Data:
 
-Download the pre-processed dataset ZIP from the Data Sources Folder. Download "final_master_hourly_data.zip" (the other files are the raw files if you choose to run the formatting as well).
+Download the pre-processed dataset ZIP from the Data Sources Folder or Releases Section. Download "final_master_hourly_data.zip" (the other files are the raw files if you choose to run the formatting as well).
 
 Extract the contents into the /data folder at the root of the project.
 
