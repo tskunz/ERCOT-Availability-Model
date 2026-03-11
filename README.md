@@ -50,5 +50,5 @@ download_weather_colab.ipynb: Automated weather data retrieval for model feature
 ## License & Citation
 This project is licensed under the MIT License.
 
-Research Paper: Availability Model to Evaluate AI Data Centers’ Role in Grid Stability (SMU, 2026). The paper is currently approved for print and scheduled for official publication next month.
-
+Research Paper: McSimov, Troy; Kunz, Trevor S.; and Billo, Jeffrey (2025) "Availability Model to Evaluate AI Data Centers’ Role in Grid Stability," SMU Data Science Review: Vol. 9: No. 3, Article 3.
+ https://scholar.smu.edu/datasciencereview/vol9/iss3/3/
