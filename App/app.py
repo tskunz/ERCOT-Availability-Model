@@ -93,12 +93,6 @@ def run_simulation(temp, humidity, hour, month, day, wind_speed, precip, cloud_c
     # DC Configuration
     dc_response = bess_mw + genset_mw + (25 * flex_pct) # Assuming 25MW base DC load
     
-    # Economics: Wasted Energy Arbitrage
-    # If there is a massive grid surplus, a Battery can charge efficiently.
-    # very rough appx: $40/MWh spread * 4 hours of charging * min(BESS capacity, Surplus)
-    surplus_mw = max(0, predicted_availability_mw - simulated_demand_mw)
-    daily_arb_value = min(bess_mw, surplus_mw) * 4 * 40
-    
     eens_results = []
     for _ in range(int(n_sims)):
         noise = np.random.choice(residuals_library)
@@ -117,7 +111,7 @@ def run_simulation(temp, humidity, hour, month, day, wind_speed, precip, cloud_c
     mean_eens = np.mean(eens_results)
     lolp = np.mean([1 if x > 0 else 0 for x in eens_results])
     
-    return f"{mean_eens:.2f} MWh", f"{lolp:.2%}", f"${daily_arb_value:,.2f} / day", fig
+    return f"{mean_eens:.2f} MWh", f"{lolp:.2%}", fig
 
 # --- 5. Gradio UI ---
 
@@ -182,7 +176,6 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                 )
                 res_eens = gr.Textbox(label="Expected Energy Not Served (EENS)")
                 res_lolp = gr.Textbox(label="Loss of Load Probability (LOLP)")
-                res_arb = gr.Textbox(label="Surplus Catch Arbitrage ($)", info="Daily value of the Battery capturing wasted grid surplus")
                 plot = gr.Plot(label="Reliability Distribution")
 
     # Wire up the logic
@@ -198,7 +191,7 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     run_btn.click(
         run_simulation, 
         inputs=weather_inputs + [simulated_demand_mw, bess, gens, flex, sims], 
-        outputs=[res_eens, res_lolp, res_arb, plot]
+        outputs=[res_eens, res_lolp, plot]
     )
 
     # Dynamic Month Demand Adjustment
