@@ -57,7 +57,7 @@ residuals_library = np.load("residuals_library.npy")
 
 # --- 4. Logic Functions ---
 
-def predict_load(temp, humidity, hour, month, day, wind_speed, precip, cloud_cover, wind_gust, year):
+def predict_availability(temp, humidity, hour, month, day, wind_speed, precip, cloud_cover, wind_gust, year):
     # Handle tricky dates like Feb 30th
     try:
         ts = pd.Timestamp(year, int(month), int(day))
@@ -85,19 +85,25 @@ def predict_load(temp, humidity, hour, month, day, wind_speed, precip, cloud_cov
     
     # Use a high start_idx to project the trend forward
     prediction = model.predict(X_input, start_idx=85000)
-    return prediction[0]
+    return float(prediction[0])
 
-def run_simulation(temp, humidity, hour, month, day, wind_speed, precip, cloud_cover, wind_gust, year, avail_gen, bess_mw, genset_mw, flex_pct, n_sims):
-    base_signal = predict_load(temp, humidity, hour, month, day, wind_speed, precip, cloud_cover, wind_gust, year)
+def run_simulation(temp, humidity, hour, month, day, wind_speed, precip, cloud_cover, wind_gust, year, simulated_demand_mw, bess_mw, genset_mw, flex_pct, n_sims):
+    predicted_availability_mw = predict_availability(temp, humidity, hour, month, day, wind_speed, precip, cloud_cover, wind_gust, year)
     
     # DC Configuration
     dc_response = bess_mw + genset_mw + (25 * flex_pct) # Assuming 25MW base DC load
     
+    # Economics: Wasted Energy Arbitrage
+    # If there is a massive grid surplus, a Battery can charge efficiently.
+    # very rough appx: $40/MWh spread * 4 hours of charging * min(BESS capacity, Surplus)
+    surplus_mw = max(0, predicted_availability_mw - simulated_demand_mw)
+    daily_arb_value = min(bess_mw, surplus_mw) * 4 * 40
+    
     eens_results = []
     for _ in range(int(n_sims)):
         noise = np.random.choice(residuals_library)
-        simulated_load = base_signal + noise
-        net_shortfall = max(0, (simulated_load - dc_response) - avail_gen)
+        simulated_available = predicted_availability_mw + noise
+        net_shortfall = max(0, (simulated_demand_mw - dc_response) - simulated_available)
         eens_results.append(net_shortfall)
     
     # Generate Interactive Plotly Histogram
@@ -111,32 +117,35 @@ def run_simulation(temp, humidity, hour, month, day, wind_speed, precip, cloud_c
     mean_eens = np.mean(eens_results)
     lolp = np.mean([1 if x > 0 else 0 for x in eens_results])
     
-    return f"{mean_eens:.2f} MWh", f"{lolp:.2%}", fig
+    return f"{mean_eens:.2f} MWh", f"{lolp:.2%}", f"${daily_arb_value:,.2f} / day", fig
 
 # --- 5. Gradio UI ---
 
 with gr.Blocks(theme=gr.themes.Soft()) as demo:
     gr.Markdown("# ⚡ ERCOT Reliability & Data Center Strategy Dashboard")
-    gr.Markdown("Forecast grid load and simulate the reliability ROI of behind-the-meter investments.")
+    gr.Markdown("Forecast grid availability and simulate the reliability ROI of behind-the-meter investments.")
     
     # Hidden year input to simulate future predictions
     future_year = gr.Number(value=2026, visible=False)
 
-    with gr.Tab("Grid Load Predictor"):
+    with gr.Tab("Grid Capacity Predictor"):
         gr.Markdown("### 🌩️ Quick Presets")
         with gr.Row():
-            btn_uri = gr.Button("🌨️ Simulate Winter Storm Uri", size="sm")
-            btn_summer = gr.Button("☀️ Simulate Summer Heatwave", size="sm")
-            btn_mild = gr.Button("🌸 Simulate Mild Spring Day", size="sm")
+            btn_uri = gr.Button("🌨️ Winter Storm Uri", size="sm")
+            btn_summer = gr.Button("☀️ Summer Heatwave", size="sm")
+            btn_mild = gr.Button("🌸 Mild Spring Day", size="sm")
+            btn_custom = gr.Button("⚙️ Reset to Custom", size="sm", variant="secondary")
 
+        gr.Markdown("---")
+        gr.Markdown("### 🛠️ Build Your Own Custom Scenario")
         with gr.Row():
             with gr.Column():
-                gr.Markdown("### 📅 Date & Time")
+                gr.Markdown("#### 📅 Date & Time")
                 mo = gr.Slider(1, 12, value=8, step=1, label="Month")
                 day = gr.Slider(1, 31, value=15, step=1, label="Day of Month")
                 hr = gr.Slider(0, 23, value=16, step=1, label="Hour of Day")
             with gr.Column():
-                gr.Markdown("### 🌡️ Basic Weather")
+                gr.Markdown("#### 🌡️ Basic Weather")
                 t = gr.Slider(0, 110, value=95, label="Temperature (°F)")
                 h = gr.Slider(0, 100, value=60, label="Humidity (%)")
         
@@ -148,14 +157,14 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                 gust = gr.Slider(0, 70, value=15, label="Wind Gusts (mph)")
 
         with gr.Row():
-            btn_pred = gr.Button("Calculate Load", variant="primary")
-            output_mw = gr.Number(label="Predicted Load (MW)")
+            btn_pred = gr.Button("Calculate Available Capacity", variant="primary")
+            output_mw = gr.Number(label="Predicted Available Capacity (MW)")
 
     with gr.Tab("DC Investment Simulator"):
         with gr.Row():
             with gr.Column():
                 gr.Markdown("### 🌩️ Grid Stress Testing")
-                avail_gen = gr.Slider(30000, 100000, value=85000, step=1000, label="Available Grid Generation (MW)")
+                simulated_demand_mw = gr.Slider(30000, 100000, value=70000, step=1000, label="Simulated Peak Demand (MW)", info="ERCOT load demand to test against predicted capacity.")
 
                 gr.Markdown("### 🔋 DC Resource Settings")
                 bess = gr.Slider(0, 50, value=10, label="BESS Power (MW)")
@@ -173,37 +182,50 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
                 )
                 res_eens = gr.Textbox(label="Expected Energy Not Served (EENS)")
                 res_lolp = gr.Textbox(label="Loss of Load Probability (LOLP)")
+                res_arb = gr.Textbox(label="Surplus Catch Arbitrage ($)", info="Daily value of the Battery capturing wasted grid surplus")
                 plot = gr.Plot(label="Reliability Distribution")
 
     # Wire up the logic
-    # predict_load signature: temp, humidity, hour, month, day, wind_speed, precip, cloud_cover, wind_gust, year
+    # predict_availability signature: temp, humidity, hour, month, day, wind_speed, precip, cloud_cover, wind_gust, year
     weather_inputs = [t, h, hr, mo, day, wind, precip, cloud, gust, future_year]
 
     btn_pred.click(
-        predict_load, 
+        predict_availability, 
         inputs=weather_inputs, 
         outputs=output_mw
     )
 
     run_btn.click(
         run_simulation, 
-        inputs=weather_inputs + [avail_gen, bess, gens, flex, sims], 
-        outputs=[res_eens, res_lolp, plot]
+        inputs=weather_inputs + [simulated_demand_mw, bess, gens, flex, sims], 
+        outputs=[res_eens, res_lolp, res_arb, plot]
     )
 
-    # Preset Logic Function Mappings
-    # Format: [temp, humidity, hour, month, day, wind, precip, cloud, gust, avail_gen]
-    def set_uri():
-        return [15, 85, 8, 2, 15, 25, 20, 100, 35, 45000]
-    def set_summer():
-        return [105, 40, 17, 8, 15, 5, 0, 10, 10, 80000]
-    def set_mild():
-        return [70, 50, 12, 4, 15, 10, 0, 20, 15, 85000]
+    # Dynamic Month Demand Adjustment
+    def update_season_demand(m):
+        m = int(m)
+        if m in [6, 7, 8, 9]: return 80000     # Summer Peak Demand
+        elif m in [12, 1, 2]: return 60000     # Winter Normal Demand
+        else: return 45000                     # Spring/Fall Normal Demand
+        
+    mo.change(update_season_demand, inputs=mo, outputs=simulated_demand_mw)
 
-    slider_targets = [t, h, hr, mo, day, wind, precip, cloud, gust, avail_gen]
+    # Preset Logic Function Mappings
+    # Format: [temp, humidity, hour, month, day, wind, precip, cloud, gust, simulated_demand_mw]
+    def set_uri():
+        return [15, 85, 8, 2, 15, 25, 20, 100, 35, 74000]  # Uri Demand
+    def set_summer():
+        return [105, 40, 17, 8, 15, 5, 0, 10, 10, 85000]   # Summer Peak
+    def set_mild():
+        return [70, 50, 12, 4, 15, 10, 0, 20, 15, 45000]   # Mild Day
+    def set_custom():
+        return [95, 60, 16, 8, 15, 10, 0, 20, 15, 70000]   # Default Custom Set
+
+    slider_targets = [t, h, hr, mo, day, wind, precip, cloud, gust, simulated_demand_mw]
     btn_uri.click(set_uri, inputs=None, outputs=slider_targets)
     btn_summer.click(set_summer, inputs=None, outputs=slider_targets)
     btn_mild.click(set_mild, inputs=None, outputs=slider_targets)
+    btn_custom.click(set_custom, inputs=None, outputs=slider_targets)
 
     with gr.Tab("Methodology & Architecture"):
         gr.Markdown("### 📚 Research Paper")
