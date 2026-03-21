@@ -87,9 +87,8 @@ def predict_load(temp, humidity, hour, month, day, wind_speed, precip, cloud_cov
     prediction = model.predict(X_input, start_idx=85000)
     return prediction[0]
 
-def run_simulation(temp, humidity, hour, month, day, wind_speed, precip, cloud_cover, wind_gust, year, bess_mw, genset_mw, flex_pct, n_sims):
+def run_simulation(temp, humidity, hour, month, day, wind_speed, precip, cloud_cover, wind_gust, year, avail_gen, bess_mw, genset_mw, flex_pct, n_sims):
     base_signal = predict_load(temp, humidity, hour, month, day, wind_speed, precip, cloud_cover, wind_gust, year)
-    supply_cap = 85000 # ERCOT target capacity
     
     # DC Configuration
     dc_response = bess_mw + genset_mw + (25 * flex_pct) # Assuming 25MW base DC load
@@ -98,7 +97,7 @@ def run_simulation(temp, humidity, hour, month, day, wind_speed, precip, cloud_c
     for _ in range(int(n_sims)):
         noise = np.random.choice(residuals_library)
         simulated_load = base_signal + noise
-        net_shortfall = max(0, (simulated_load - dc_response) - supply_cap)
+        net_shortfall = max(0, (simulated_load - dc_response) - avail_gen)
         eens_results.append(net_shortfall)
     
     # Generate Interactive Plotly Histogram
@@ -155,6 +154,9 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
     with gr.Tab("DC Investment Simulator"):
         with gr.Row():
             with gr.Column():
+                gr.Markdown("### 🌩️ Grid Stress Testing")
+                avail_gen = gr.Slider(30000, 100000, value=85000, step=1000, label="Available Grid Generation (MW)")
+
                 gr.Markdown("### 🔋 DC Resource Settings")
                 bess = gr.Slider(0, 50, value=10, label="BESS Power (MW)")
                 gens = gr.Slider(0, 50, value=5, label="Genset Capacity (MW)")
@@ -164,6 +166,11 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
             
             with gr.Column():
                 gr.Markdown("### 📊 Risk Metrics")
+                gr.Markdown(
+                    "**💡 Metric Guide:**\n"
+                    "* **EENS (Expected Energy Not Served):** The average megawatt-hours (MWh) of grid shortfall across all simulations. *Lower is better.*\n"
+                    "* **LOLP (Loss of Load Probability):** The percentage chance that a grid outage or shortfall occurs at all. *Lower is better.*"
+                )
                 res_eens = gr.Textbox(label="Expected Energy Not Served (EENS)")
                 res_lolp = gr.Textbox(label="Loss of Load Probability (LOLP)")
                 plot = gr.Plot(label="Reliability Distribution")
@@ -180,19 +187,20 @@ with gr.Blocks(theme=gr.themes.Soft()) as demo:
 
     run_btn.click(
         run_simulation, 
-        inputs=weather_inputs + [bess, gens, flex, sims], 
+        inputs=weather_inputs + [avail_gen, bess, gens, flex, sims], 
         outputs=[res_eens, res_lolp, plot]
     )
 
     # Preset Logic Function Mappings
+    # Format: [temp, humidity, hour, month, day, wind, precip, cloud, gust, avail_gen]
     def set_uri():
-        return [15, 85, 8, 2, 15, 25, 20, 100, 35]
+        return [15, 85, 8, 2, 15, 25, 20, 100, 35, 45000]
     def set_summer():
-        return [105, 40, 17, 8, 15, 5, 0, 10, 10]
+        return [105, 40, 17, 8, 15, 5, 0, 10, 10, 80000]
     def set_mild():
-        return [70, 50, 12, 4, 15, 10, 0, 20, 15]
+        return [70, 50, 12, 4, 15, 10, 0, 20, 15, 85000]
 
-    slider_targets = [t, h, hr, mo, day, wind, precip, cloud, gust]
+    slider_targets = [t, h, hr, mo, day, wind, precip, cloud, gust, avail_gen]
     btn_uri.click(set_uri, inputs=None, outputs=slider_targets)
     btn_summer.click(set_summer, inputs=None, outputs=slider_targets)
     btn_mild.click(set_mild, inputs=None, outputs=slider_targets)
