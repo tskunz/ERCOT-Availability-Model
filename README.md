@@ -4,6 +4,9 @@ Availability Model to Evaluate AI Data Centers’ Role in Grid Stability
 This repository contains the codebase and methodology for evaluating the impact of large-scale AI data centers on the ERCOT power grid. The research focuses on the "First-Principled Hybrid Model," which outperforms standard machine learning approaches by combining deterministic linear trends with residual-based XGBoost learning.
 
 ## Quick Start
+An interactive demo is available at the below link:
+https://huggingface.co/spaces/Tskunz/ERCOT-Availability-Model
+
 To run the model immediately without setting up API credentials or downloading years of raw data, follow these steps:
 
 Clone the Repository:
